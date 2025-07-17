@@ -1,0 +1,20 @@
+name: "openpom_model"
+backend: "python"
+
+input [
+  {
+    name: "SMILES"
+    data_type: TYPE_STRING
+    dims: [1]
+  }
+]
+
+output [
+  {
+    name: "OUTPUT"
+    data_type: TYPE_FP32
+    dims: [128]
+  }
+]
+
+max_batch_size: 1
