@@ -15,43 +15,6 @@ from openpom.utils.data_utils import get_class_imbalance_ratio
 #from openpom.models.mpnn_pom import MPNNPOMModel
 from datetime import datetime
 
-#sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "openpom_src"))
-#from src.models.gcn_model import GCNModel
-
-def smiles_to_pyg_graph(smiles: str) -> Data:
-    print("begin: smiles_to_pyg_graph")
-    smiles= "CC(=O)OC1=CC=CC=C1C(=O)O"
-    mol = Chem.MolFromSmiles(smiles)
-
-    print("smiles_to_pyg_graph:1")
-
-    if mol is None:
-        raise ValueError("Invalid SMILES")
-
-    num_atoms = mol.GetNumAtoms()
-    atom_features = []
-
-    for atom in mol.GetAtoms():
-        atom_features.append([atom.GetAtomicNum()])
-
-    edge_index = []
-    edge_attr = []
-
-    for bond in mol.GetBonds():
-        start = bond.GetBeginAtomIdx()
-        end = bond.GetEndAtomIdx()
-        edge_index.append([start, end])
-        edge_index.append([end, start])
-        edge_attr.append([bond.GetBondTypeAsDouble()])
-        edge_attr.append([bond.GetBondTypeAsDouble()])
-
-    x = torch.tensor(atom_features, dtype=torch.float)
-    edge_index = torch.tensor(edge_index, dtype=torch.long).t().contiguous()
-    edge_attr = torch.tensor(edge_attr, dtype=torch.float)
-
-    data = Data(x=x, edge_index=edge_index, edge_attr=edge_attr)
-    return data
-
 
 class TritonPythonModel:
     def initialize(self, args):
@@ -128,40 +91,24 @@ class TritonPythonModel:
 
         for request in requests:
             try:
-                #smiles_input = pb_utils.get_input_tensor_by_name(request, "SMILES").as_numpy()[0]
-                #smiles_str = smiles_input.decode("utf-8")
+
                 smiles_input = pb_utils.get_input_tensor_by_name(request, "SMILES")
                 smiles = smiles_input.as_numpy()  # shape: (batch, 1)
                 smiles_str = [x[0].decode("utf-8") for x in smiles]
                 
-                print("after process smiles")
+               
+                graph_featurized = GraphFeaturizer()
+                dataset = dc.data.NumpyDataset(X=[graph_featurized.featurize([smiles_str[0]])[0]])
+                preds = self.model.predict(dataset)
 
-                graph_data = smiles_to_pyg_graph(smiles_str)
-                print("graph1")
-
-                graph_data = graph_data.to("cpu")
-                print("graph2")
-
-                graph_data.batch = torch.zeros(graph_data.num_nodes, dtype=torch.long)
-                
-                print("after function")
-                
-                randomstratifiedsplitter = dc.splits.RandomStratifiedSplitter()
-                train_dataset, test_dataset, valid_dataset = randomstratifiedsplitter.train_valid_test_split(self.dataset, frac_train = 0.8, frac_valid = 0.1, frac_test = 0.1, seed = 1)
-                metric = dc.metrics.Metric(dc.metrics.roc_auc_score)
-                test_scores = self.model.evaluate(test_dataset, [metric])['roc_auc_score']
-                print("after evaluation")
-                print("test_score: ", test_scores)
-                #with torch.no_grad():
-                #    output = self.model(graph_data)
-                #    result = output.squeeze().cpu().numpy()
-                #print("after squeeze")
-                result = np.array(test_scores, dtype=np.float32)
-                if result.ndim == 0:
-                    result = np.expand_dims(result, axis=0)  # shape = (1,)
+                result = np.array(preds, dtype=np.float32)
+                if result.ndim == 1:
+                    result = result.reshape(-1, 1)  #
                 output_tensor = pb_utils.Tensor("OUTPUT", result)
-                #output_tensor = pb_utils.Tensor("OUTPUT", result.astype(np.float32))
                 inference_response = pb_utils.InferenceResponse(output_tensors=[output_tensor])
+
+                print("after predict")
+                print("result: ", result)
 
             except Exception as e:
                 error_response = pb_utils.InferenceResponse(
