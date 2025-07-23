@@ -19,8 +19,7 @@ from datetime import datetime
 class TritonPythonModel:
     def initialize(self, args):
         model_path = os.path.join(os.path.dirname(__file__), "example_model.pt")
-        #self.model = torch.load(model_path, map_location=torch.device("cpu"))
-        #self.model.eval()
+
         TASKS = [
 'alcoholic', 'aldehydic', 'alliaceous', 'almond', 'amber', 'animal',
 'anisic', 'apple', 'apricot', 'aromatic', 'balsamic', 'banana', 'beefy',
