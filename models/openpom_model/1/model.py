@@ -19,7 +19,12 @@ from datetime import datetime
 #from src.models.gcn_model import GCNModel
 
 def smiles_to_pyg_graph(smiles: str) -> Data:
+    print("begin: smiles_to_pyg_graph")
+    smiles= "CC(=O)OC1=CC=CC=C1C(=O)O"
     mol = Chem.MolFromSmiles(smiles)
+
+    print("smiles_to_pyg_graph:1")
+
     if mol is None:
         raise ValueError("Invalid SMILES")
 
@@ -81,6 +86,7 @@ class TritonPythonModel:
         loader = dc.data.CSVLoader(tasks=TASKS,
                    feature_field=smiles_field,
                    featurizer=featurizer)
+        self.dataset = loader.create_dataset(inputs=[input_file])
         dataset = loader.create_dataset(inputs=[input_file])
         n_tasks = len(dataset.tasks)
 
@@ -114,6 +120,7 @@ class TritonPythonModel:
             model_dir=model_path,  #
             device_name='cpu'
         )
+        print("DEBUG: self.model type is", type(self.model))
 #        self.model.eval()
 
     def execute(self, requests):
@@ -121,18 +128,39 @@ class TritonPythonModel:
 
         for request in requests:
             try:
-                smiles_input = pb_utils.get_input_tensor_by_name(request, "SMILES").as_numpy()[0]
-                smiles_str = smiles_input.decode("utf-8")
+                #smiles_input = pb_utils.get_input_tensor_by_name(request, "SMILES").as_numpy()[0]
+                #smiles_str = smiles_input.decode("utf-8")
+                smiles_input = pb_utils.get_input_tensor_by_name(request, "SMILES")
+                smiles = smiles_input.as_numpy()  # shape: (batch, 1)
+                smiles_str = [x[0].decode("utf-8") for x in smiles]
+                
+                print("after process smiles")
 
                 graph_data = smiles_to_pyg_graph(smiles_str)
+                print("graph1")
+
                 graph_data = graph_data.to("cpu")
+                print("graph2")
+
                 graph_data.batch = torch.zeros(graph_data.num_nodes, dtype=torch.long)
-
-                with torch.no_grad():
-                    output = self.model(graph_data)
-                    result = output.squeeze().cpu().numpy()
-
-                output_tensor = pb_utils.Tensor("OUTPUT", result.astype(np.float32))
+                
+                print("after function")
+                
+                randomstratifiedsplitter = dc.splits.RandomStratifiedSplitter()
+                train_dataset, test_dataset, valid_dataset = randomstratifiedsplitter.train_valid_test_split(self.dataset, frac_train = 0.8, frac_valid = 0.1, frac_test = 0.1, seed = 1)
+                metric = dc.metrics.Metric(dc.metrics.roc_auc_score)
+                test_scores = self.model.evaluate(test_dataset, [metric])['roc_auc_score']
+                print("after evaluation")
+                print("test_score: ", test_scores)
+                #with torch.no_grad():
+                #    output = self.model(graph_data)
+                #    result = output.squeeze().cpu().numpy()
+                #print("after squeeze")
+                result = np.array(test_scores, dtype=np.float32)
+                if result.ndim == 0:
+                    result = np.expand_dims(result, axis=0)  # shape = (1,)
+                output_tensor = pb_utils.Tensor("OUTPUT", result)
+                #output_tensor = pb_utils.Tensor("OUTPUT", result.astype(np.float32))
                 inference_response = pb_utils.InferenceResponse(output_tensors=[output_tensor])
 
             except Exception as e:
